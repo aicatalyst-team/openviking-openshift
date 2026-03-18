@@ -180,27 +180,6 @@ curl -sk -X POST "${OV_URL}/api/v1/sessions/my-session/commit" \
   -H "X-API-Key: ${ROOT_KEY}"
 ```
 
-### MCP Integration
-
-Use OpenViking as an MCP server with Claude Code, Cursor, or any MCP-compatible client:
-
-```bash
-# Claude Code
-claude mcp add openviking --transport sse "${OV_URL}/mcp"
-```
-
-For Claude Desktop, add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "openviking": {
-      "url": "https://YOUR-ROUTE/mcp"
-    }
-  }
-}
-```
-
 ### Python SDK
 
 ```bash
@@ -237,8 +216,8 @@ pip install openviking
 mkdir -p ~/.openviking
 cat > ~/.openviking/ovcli.conf <<EOF
 {
-  "url": "https://YOUR-ROUTE",
-  "api_key": "YOUR-ROOT-KEY"
+  "url": "${OV_URL}",
+  "api_key": "${ROOT_KEY}"
 }
 EOF
 
