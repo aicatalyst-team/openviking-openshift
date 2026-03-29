@@ -5,14 +5,11 @@ namespace: openviking
 
 resources:
   - 01-namespace.yaml
-  - 02-ollama-pvc.yaml
-  - 03-ollama-deployment.yaml
-  - 04-ollama-service.yaml
-  - 05-openviking-secret.yaml
-  - 06-openviking-pvc.yaml
-  - 07-openviking-deployment.yaml
-  - 08-openviking-service.yaml
-  - 09-openviking-route.yaml
+  - 02-openviking-secret.yaml
+  - 03-openviking-pvc.yaml
+  - 04-openviking-deployment.yaml
+  - 05-openviking-service.yaml
+  - 06-openviking-route.yaml
 
 labels:
   - pairs:

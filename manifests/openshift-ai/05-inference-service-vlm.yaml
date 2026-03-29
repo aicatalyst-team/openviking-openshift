@@ -1,0 +1,28 @@
+# InferenceService for Qwen3-32B (VLM for L0/L1 generation).
+# Uses PVC storage. Run the download job first.
+#
+# The served model name "qwen3-32b" is used by OpenViking in ov.conf.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen3-32b
+  namespace: openviking-models
+  annotations:
+    openshift.io/display-name: Qwen3-32B
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  predictor:
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+        limits:
+          nvidia.com/gpu: "1"
+      runtime: vllm-vlm-runtime
+      storageUri: pvc://qwen3dot5-27b-data

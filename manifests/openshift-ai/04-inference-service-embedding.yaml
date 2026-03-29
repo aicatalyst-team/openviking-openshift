@@ -1,0 +1,28 @@
+# InferenceService for Qwen3-Embedding-0.6B.
+# Uses PVC storage. Run the download job (07-download-jobs.yaml) first.
+#
+# The served model name "qwen3-embedding" is used by OpenViking in ov.conf.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen3-embedding
+  namespace: openviking-models
+  annotations:
+    openshift.io/display-name: Qwen3-Embedding-0.6B
+    serving.kserve.io/deploymentMode: RawDeployment
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  predictor:
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+        limits:
+          nvidia.com/gpu: "1"
+      runtime: vllm-embedding-runtime
+      storageUri: pvc://qwen3-embedding-data

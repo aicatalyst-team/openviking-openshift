@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openviking-models
+  labels:
+    app: openviking
+    opendatahub.io/dashboard: "true"
+  annotations:
+    openshift.io/description: "vLLM model serving for OpenViking (Qwen3 embedding + VLM)"
+    openshift.io/display-name: "OpenViking Models"

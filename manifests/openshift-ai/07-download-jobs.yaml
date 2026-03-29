@@ -1,0 +1,110 @@
+# Job to download Qwen3-Embedding-0.6B from HuggingFace.
+# Run once before creating the InferenceService.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-qwen3-embedding
+  namespace: openviking-models
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: model-download
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: download
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - /bin/bash
+            - -c
+            - |
+              pip install -q huggingface_hub && \
+              python3 -c "
+              from huggingface_hub import snapshot_download
+              snapshot_download(
+                  repo_id='Qwen/Qwen3-Embedding-0.6B',
+                  local_dir='/mnt/models',
+                  local_dir_use_symlinks=False
+              )
+              print('Download complete.')
+              "
+          volumeMounts:
+            - name: model-data
+              mountPath: /mnt/models
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: model-data
+          persistentVolumeClaim:
+            claimName: qwen3-embedding-data
+      restartPolicy: Never
+---
+# Job to download Qwen3-32B from HuggingFace.
+# This is a large download (~65 GB). Ensure sufficient bandwidth and timeout.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-qwen3-32b
+  namespace: openviking-models
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 7200
+  template:
+    metadata:
+      labels:
+        app: model-download
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: download
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - /bin/bash
+            - -c
+            - |
+              pip install -q huggingface_hub && \
+              python3 -c "
+              from huggingface_hub import snapshot_download
+              snapshot_download(
+                  repo_id='Qwen/Qwen3-32B',
+                  local_dir='/mnt/models',
+                  local_dir_use_symlinks=False
+              )
+              print('Download complete.')
+              "
+          volumeMounts:
+            - name: model-data
+              mountPath: /mnt/models
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+      volumes:
+        - name: model-data
+          persistentVolumeClaim:
+            claimName: qwen3-32b-data
+      restartPolicy: Never

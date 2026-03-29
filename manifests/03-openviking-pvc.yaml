@@ -11,4 +11,4 @@ spec:
   resources:
     requests:
       storage: 50Gi
-  storageClassName: gp3-csi
+  storageClassName: ibmc-vpc-block-10iops-tier

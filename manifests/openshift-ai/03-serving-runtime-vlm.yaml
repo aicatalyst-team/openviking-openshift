@@ -1,0 +1,49 @@
+# vLLM ServingRuntime for generative models (VLM / L0-L1 generation).
+# Uses the default vLLM runtime configuration for text generation.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-vlm-runtime
+  namespace: openviking-models
+  annotations:
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    openshift.io/display-name: vLLM VLM ServingRuntime for KServe
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+  containers:
+    - name: kserve-container
+      image: registry.redhat.io/rhoai/odh-vllm-cuda-rhel9@sha256:751e2359439161babb9ad8e93e16251888a8c07aed895ffa55e4dfaf2a45f89d
+      command:
+        - python
+        - -m
+        - vllm.entrypoints.openai.api_server
+      args:
+        - --port=8080
+        - --model=/mnt/models
+        - --served-model-name={{.Name}}
+        - --trust-remote-code
+        - --max-model-len=16384
+        - --gpu-memory-utilization=0.85
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          cpu: "4"
+          memory: 32Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+  multiModel: false
+  supportedModelFormats:
+    - autoSelect: true
+      name: vLLM

@@ -1,77 +1,108 @@
 # OpenViking on OpenShift
 
-Deploy [OpenViking](https://github.com/volcengine/OpenViking) — a Context Database for AI Agents — on OpenShift.
+Deploy [OpenViking](https://github.com/volcengine/OpenViking) -- a Context Database for AI Agents -- on OpenShift with fully self-hosted model serving via OpenShift AI and vLLM.
 
 ## Architecture
 
 ```
-┌─ OpenShift Namespace: openviking ─────────────────────────────────────┐
+┌─ OpenShift AI (openviking-models namespace) ───────────────────────────┐
 │                                                                        │
-│  ┌──────────────┐                    ┌─────────────────────┐          │
-│  │   Ollama     │◄── embedding ────► │  OpenViking Server  │          │
-│  │  (internal)  │   port 11434       │    port 1933        │          │
-│  │              │                    │                     │          │
-│  │ nomic-embed  │                    │  VLM: Claude Sonnet │          │
-│  │   -text      │                    │  4.6 (Anthropic API)│          │
-│  └──────┬───────┘                    └──────────┬──────────┘          │
-│         │                                       │                     │
-│    [PVC 10Gi]                              [PVC 50Gi]                 │
-│    ollama-data                          openviking-data                │
-│                                                 │                     │
-│                                          [Route / TLS]                │
-│                                   https://openviking-openviking...    │
+│  ┌─────────────────────┐         ┌──────────────────────┐             │
+│  │  vLLM Embedding     │         │  vLLM VLM            │             │
+│  │  Qwen3-Embedding    │         │  Qwen3-32B           │             │
+│  │  -0.6B              │         │                      │             │
+│  │  /v1/embeddings     │         │  /v1/chat/completions │             │
+│  └─────────────────────┘         └──────────────────────┘             │
+│         A100 80GB GPU (shared)                                         │
 └────────────────────────────────────────────────────────────────────────┘
-                                          │
-                              External Anthropic API
-                          (for L0/L1 semantic generation)
+                    ▲                           ▲
+                    │ embedding                 │ L0/L1 generation
+                    │                           │
+┌─ OpenViking (openviking namespace) ───────────────────────────────────┐
+│                                                                        │
+│  ┌─────────────────────┐                                              │
+│  │  OpenViking Server  │────────────── [Route / TLS]                  │
+│  │    port 1933        │                                              │
+│  │                     │                                              │
+│  └──────────┬──────────┘                                              │
+│        [PVC 50Gi]                                                      │
+│     openviking-data                                                    │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
 
-| Component | Image | Purpose |
-|-----------|-------|---------|
+| Component | Serving | Purpose |
+|-----------|---------|---------|
 | **OpenViking Server** | `quay.io/aicatalyst/openviking:latest` | Context database with REST API, port 1933 |
-| **Ollama** | `docker.io/ollama/ollama:latest` | Self-hosted embedding model (`nomic-embed-text`, 768d), port 11434 |
+| **Qwen3-Embedding-0.6B** | vLLM via OpenShift AI (KServe) | Self-hosted embedding model, OpenAI-compatible `/v1/embeddings` |
+| **Qwen3-32B** | vLLM via OpenShift AI (KServe) | Self-hosted VLM for L0/L1 semantic generation, OpenAI-compatible `/v1/chat/completions` |
 
-### Why Ollama?
+### Why OpenShift AI?
 
-OpenViking requires an embedding model for vector search. Instead of paying for a cloud embedding API, we self-host an open-source model (nomic-embed-text) using Ollama on OpenShift. The VLM (Sonnet 4.6) is the only external API call.
+OpenViking requires both an embedding model and a VLM for semantic generation. Instead of relying on external API calls, this deployment uses OpenShift AI to serve both models entirely on-cluster:
+
+- **Managed model serving via KServe** -- declarative InferenceService resources handle lifecycle, scaling, and routing
+- **GPU-optimized vLLM inference** -- high-throughput serving with continuous batching and PagedAttention
+- **OpenAI-compatible APIs** -- both models expose standard `/v1/` endpoints, no client-side changes needed
+- **Fully self-hosted** -- no external API calls required; all data stays within your cluster
+- **Enterprise-grade with autoscaling** -- KServe can scale replicas based on request load, including scale-to-zero
 
 ## Prerequisites
 
-- OpenShift 4.x cluster (tested on 4.20 / ROSA)
+- OpenShift 4.x cluster with the **OpenShift AI** operator installed (tested on 4.20 / ROKS)
+- NVIDIA GPU node (A100 80GB recommended -- fits both models on a single device with GPU time-slicing, ~62 GB total VRAM: 5% GPU for embeddings + 85% for VLM)
 - `oc` CLI authenticated with cluster access
-- An **Anthropic API key** for Claude Sonnet 4.6 (VLM)
 - `podman` (optional, for building the image yourself)
+
+No Anthropic API key or other external API credentials are needed. The entire stack is self-hosted.
 
 ## Deployment
 
-### 1. Edit the secret template
+### 1. Deploy OpenShift AI model serving
 
-Before deploying, edit `manifests/05-openviking-secret.yaml` and replace the placeholder values:
+Apply the OpenShift AI manifests to create the model serving namespace, serving runtimes, and inference services:
 
-- `REPLACE_WITH_YOUR_ANTHROPIC_API_KEY` — your Anthropic API key
-- `REPLACE_WITH_A_STRONG_ROOT_KEY` — a strong root key for API access (e.g. `openssl rand -hex 16`)
+```bash
+oc apply -k manifests/openshift-ai/
+```
 
-### 2. Deploy everything with Kustomize
+This creates the `openviking-models` namespace with two vLLM-based InferenceServices. Ensure the model storage (e.g., PVC or S3 bucket) is configured for your environment and that the model weights are accessible.
+
+Wait for the inference services to become ready:
+
+```bash
+oc wait --for=condition=Ready inferenceservice/qwen3-embedding -n openviking-models --timeout=600s
+oc wait --for=condition=Ready inferenceservice/qwen3-32b -n openviking-models --timeout=600s
+```
+
+### 2. Edit the secret template
+
+Before deploying OpenViking, edit `manifests/02-openviking-secret.yaml` and replace the placeholder values:
+
+- `REPLACE_WITH_EMBEDDING_ROUTE` -- the route URL for the embedding InferenceService
+- `REPLACE_WITH_VLM_ROUTE` -- the route URL for the VLM InferenceService
+- `REPLACE_WITH_A_STRONG_ROOT_KEY` -- a strong root key for API access (e.g. `openssl rand -hex 16`)
+
+You can retrieve the model routes with:
+
+```bash
+oc get inferenceservice qwen3-embedding -n openviking-models -o jsonpath='{.status.url}'
+oc get inferenceservice qwen3-32b -n openviking-models -o jsonpath='{.status.url}'
+```
+
+### 3. Deploy OpenViking
 
 ```bash
 oc apply -k manifests/
 ```
 
-This creates the namespace, PVCs, secrets, deployments, services, and route in one command.
+This creates the namespace, PVC, secret, deployment, service, and route in one command.
 
-### 3. Wait for rollout
+### 4. Wait for rollout
 
 ```bash
-oc rollout status deployment/ollama -n openviking --timeout=180s
 oc rollout status deployment/openviking -n openviking --timeout=180s
-```
-
-### 4. Pull the embedding model
-
-```bash
-oc exec deployment/ollama -n openviking -- ollama pull nomic-embed-text
 ```
 
 ### 5. Verify
@@ -248,7 +279,7 @@ podman push quay.io/aicatalyst/openviking:$(git rev-parse --short HEAD)
 ```
 
 > **Note:** Building on Apple Silicon (ARM64) for amd64 uses QEMU emulation.
-> The build compiles Go, Rust, and C++ from source — expect 30-60+ minutes.
+> The build compiles Go, Rust, and C++ from source -- expect 30-60+ minutes.
 
 ## OpenShift-Specific Notes
 
@@ -268,7 +299,6 @@ All manifests comply with the `restricted-v2` SCC (OpenShift default):
 | PVC | Size | Purpose |
 |-----|------|---------|
 | `openviking-data` | 50Gi | Vector index + AGFS file storage |
-| `ollama-data` | 10Gi | Embedding model weights |
 
 Default StorageClass is `gp3-csi` (AWS EBS). Change in PVC manifests for other providers.
 
@@ -283,22 +313,23 @@ oc delete pod -l app=openviking -n openviking
 
 ### VLM Providers
 
-The default config uses Claude Sonnet 4.6 via LiteLLM. To use a different provider, update the `vlm` section in `05-openviking-secret.yaml`:
+The default config uses Qwen3-32B served via vLLM on OpenShift AI, accessed through the OpenAI-compatible `/v1/chat/completions` endpoint. To use a different provider, update the `vlm` section in `02-openviking-secret.yaml`:
 
 | Provider | Model Example | Config `provider` |
 |----------|---------------|-------------------|
+| vLLM (OpenShift AI) | `Qwen3-32B` | `openai` (compatible API) |
 | OpenAI | `gpt-4o` | `openai` |
 | Anthropic (via LiteLLM) | `claude-sonnet-4-6` | `litellm` |
 | Volcengine | `doubao-seed-2-0-pro-260215` | `volcengine` |
 | DeepSeek (via LiteLLM) | `deepseek-chat` | `litellm` |
-| Ollama local (via LiteLLM) | `ollama/llama3.1` | `litellm` |
 
 ### Embedding Providers
 
-The default uses self-hosted Ollama. Alternatives:
+The default uses Qwen3-Embedding-0.6B served via vLLM on OpenShift AI, accessed through the OpenAI-compatible `/v1/embeddings` endpoint. To use a different provider, update the `embedding` section in `02-openviking-secret.yaml`:
 
 | Provider | Model | Config `provider` |
 |----------|-------|-------------------|
+| vLLM (OpenShift AI) | `Qwen3-Embedding-0.6B` | `openai` (compatible API) |
 | Ollama (self-hosted) | `nomic-embed-text` | `openai` (compatible API) |
 | OpenAI | `text-embedding-3-large` | `openai` |
 | Jina | `jina-embeddings-v5-text-small` | `jina` |
@@ -331,20 +362,25 @@ Auth is via `X-API-Key` header or `Authorization: Bearer` header.
 manifests/
   kustomization.yaml            # Kustomize config (oc apply -k manifests/)
   01-namespace.yaml             # Namespace
-  02-ollama-pvc.yaml            # Ollama persistent storage (10Gi)
-  03-ollama-deployment.yaml     # Ollama deployment (embedding model)
-  04-ollama-service.yaml        # Ollama ClusterIP service
-  05-openviking-secret.yaml     # Config template (edit before deploying)
-  06-openviking-pvc.yaml        # OpenViking persistent storage (50Gi)
-  07-openviking-deployment.yaml # OpenViking server deployment
-  08-openviking-service.yaml    # OpenViking ClusterIP service
-  09-openviking-route.yaml      # OpenShift Route (TLS edge)
+  02-openviking-secret.yaml     # Config template (edit before deploying)
+  03-openviking-pvc.yaml        # OpenViking persistent storage (50Gi)
+  04-openviking-deployment.yaml # OpenViking server deployment
+  05-openviking-service.yaml    # OpenViking ClusterIP service
+  06-openviking-route.yaml      # OpenShift Route (TLS edge)
+  openshift-ai/
+    kustomization.yaml              # Kustomize config for model serving
+    01-namespace.yaml               # Model serving namespace
+    02-serving-runtime-embedding.yaml # vLLM ServingRuntime for embeddings
+    03-serving-runtime-vlm.yaml     # vLLM ServingRuntime for VLM
+    04-inference-service-embedding.yaml # Qwen3-Embedding-0.6B InferenceService
+    05-inference-service-vlm.yaml   # Qwen3-32B InferenceService
 ```
 
 ## Teardown
 
 ```bash
 oc delete -k manifests/
+oc delete -k manifests/openshift-ai/
 ```
 
 ## License

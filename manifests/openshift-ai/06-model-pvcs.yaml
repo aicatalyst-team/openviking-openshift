@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qwen3-embedding-data
+  namespace: openviking-models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: ibmc-vpc-block-10iops-tier
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qwen3-32b-data
+  namespace: openviking-models
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: ibmc-vpc-block-10iops-tier
